@@ -23,8 +23,10 @@ import config
 from icon import create_tray_icon
 from ncm_auto_convert import is_file_locked, wait_until_stable
 
-# 单实例锁文件
-LOCK_FILE = Path(os.environ.get("LOCALAPPDATA", "")) / "NCM-AutoConvert" / ".lock"
+# 单实例锁文件 + 信号文件
+APPDATA_DIR = Path(os.environ.get("LOCALAPPDATA", "")) / "NCM-AutoConvert"
+LOCK_FILE = APPDATA_DIR / ".lock"
+SIGNAL_FILE = APPDATA_DIR / ".show_settings"
 
 # ──────────────────────────────────────────────
 #  核心转换逻辑（精简版，复用 ncm_auto_convert 模块）
@@ -401,6 +403,18 @@ class TrayApp:
         )
         self.converter.start()
 
+    def _watch_signal(self):
+        """监听信号文件 — 其他实例请求打开设置时触发"""
+        while True:
+            time.sleep(1)
+            if SIGNAL_FILE.exists():
+                try:
+                    SIGNAL_FILE.unlink()
+                except OSError:
+                    pass
+                self.log.info("收到信号：打开设置")
+                self._on_settings()
+
     def run(self):
         """主入口"""
         # 检查 ncmdump
@@ -418,6 +432,9 @@ class TrayApp:
                 sys.exit(0)
         else:
             self._start_converter()
+
+        # 启动信号文件监听线程
+        threading.Thread(target=self._watch_signal, daemon=True).start()
 
         # 创建并运行托盘
         self._create_tray_icon()
@@ -444,10 +461,9 @@ if __name__ == "__main__":
     if LOCK_FILE.exists():
         try:
             old_pid = int(LOCK_FILE.read_text().strip())
-            # 检查进程是否还活着
-            import signal
             os.kill(old_pid, 0)
-            # 还活着，退出
+            # 已有实例在跑 → 发信号让它打开设置
+            SIGNAL_FILE.write_text("show_settings")
             sys.exit(0)
         except (ValueError, OSError, ProcessLookupError):
             # 进程已死，清理残留锁
