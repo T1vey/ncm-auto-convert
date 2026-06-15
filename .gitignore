@@ -1,9 +1,14 @@
 __pycache__/
 *.pyc
 *.pyo
-.ncm_processed
+*.egg-info/
+dist/
+build/
+*.spec
+*.log
 *.ncm
 *.mp3
 *.lrc
-*.log
 ncmdump.exe
+test_icon.png
+.env

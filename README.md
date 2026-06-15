@@ -1,55 +1,96 @@
 # NCM Auto Converter
 
-网易云音乐 NCM → MP3 自动转换守护。下载完一首自动转、自动删，全程无需手动操作。
+网易云音乐 NCM → MP3 自动转换守护。**系统托盘应用**，下载完一首自动转、自动删，全程无需手动操作。
 
 ## 核心特性
 
+- **系统托盘常驻** — 通知区小图标，不占任务栏，不弹黑框
+- **首次启动弹窗设置** — 选择下载目录即可，参数有默认值
 - **安全转换** — 文件大小稳定检测 + 文件锁检测，不会转换"下了一半"的文件
 - **自动清理** — 转换成功后自动删除 `.ncm`，已有 `.mp3` 的残留也会清理
-- **零依赖** — 仅需 Python 标准库 + [ncmdump](https://github.com/anonymous5l/ncmdump)
-- **低占用** — 内存 ~5-16 MB，CPU 接近 0
-- **开机自启** — 一键配置 Windows 开机静默运行
+- **低占用** — 内存 ~30 MB，CPU 接近 0
+
+## 截图
+
+```
+  ┌─────────────────────────────────────┐
+  │  ♪ NCM Auto Converter — 设置        │
+  │                                     │
+  │  监控目录：[D:\Music\Download    ] [浏览…] │
+  │  ncmdump： [D:\Music\ncmdump.exe ] [浏览…] │
+  │                                     │
+  │  ┌─ 参数 ─────────────────────────┐ │
+  │  │ 扫描间隔：[5]秒   稳定检测：[3]次  │ │
+  │  │ 检测间隔：[5]秒   转换超时：[120]秒│ │
+  │  └────────────────────────────────┘ │
+  │                                     │
+  │      [ 保存并开始监控 ]  [ 取消 ]     │
+  └─────────────────────────────────────┘
+
+  系统托盘（右下角）：
+    ┌─────────────────────────┐
+    │ 状态: 监控中             │
+    │ ─────────────────────── │
+    │ 打开设置                 │
+    │ 打开日志                 │
+    │ ─────────────────────── │
+    │ 退出                     │
+    └─────────────────────────┘
+```
 
 ## 快速开始
 
-### 1. 准备
-
-确保目录结构如下：
-
-```
-你的网易云下载目录/
-├── ncmdump.exe          ← 从 ncmdump 项目下载
-├── ncm_auto_convert.py  ← 本脚本
-├── 歌曲A.ncm
-├── 歌曲B.ncm
-└── ...
-```
-
-> **ncmdump 下载**：https://github.com/anonymous5l/ncmdump/releases
-
-### 2. 运行
+### 1. 安装
 
 ```bash
-# 监控脚本所在目录（最简单）
-python ncm_auto_convert.py
+# 克隆仓库
+git clone https://github.com/T1vey/ncm-auto-convert.git
+cd ncm-auto-convert
 
-# 监控指定目录
-python ncm_auto_convert.py -d "D:\Music\Download"
-
-# 只处理现有文件，不持续监控
-python ncm_auto_convert.py --once
-
-# 后台静默运行（无窗口）
-pythonw ncm_auto_convert.py
+# 安装依赖
+pip install -r requirements.txt
 ```
 
-### 3. Windows 开机自启
+### 2. 准备 ncmdump
 
-双击 `install_startup.bat` 即可。会创建一个隐藏窗口的启动项。
+从 [ncmdump Releases](https://github.com/anonymous5l/ncmdump/releases) 下载 `ncmdump.exe`，放到你的网易云下载目录下。
 
-卸载：双击 `uninstall_startup.bat`，或删除 `shell:startup` 中的 `ncm_watcher.vbs`。
+### 3. 运行
 
-## 命令行参数
+```bash
+python tray_app.py
+```
+
+首次启动会弹出设置窗口，选择你的网易云下载目录，点击「保存并开始监控」。
+
+之后应用最小化到系统托盘，自动监控、转换、清理。
+
+### 4. 开机自启（可选）
+
+```bash
+# 方式 1：运行安装脚本
+install_startup.bat
+
+# 方式 2：手动
+# 把 tray_app.py 的快捷方式放到 shell:startup 文件夹
+```
+
+## 命令行模式
+
+如果不需要 GUI，也可以直接用命令行版：
+
+```bash
+# 持续监控
+python ncm_auto_convert.py -d "D:\Music\Download"
+
+# 只处理现有文件
+python ncm_auto_convert.py --once
+
+# 自定义参数
+python ncm_auto_convert.py --poll 10 --stable 5 -v
+```
+
+### 命令行参数
 
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
@@ -57,7 +98,7 @@ pythonw ncm_auto_convert.py
 | `--ncmdump` | 目录下 ncmdump.exe | ncmdump 路径 |
 | `--once` | - | 只处理现有文件，不持续监控 |
 | `--poll` | 5 | 扫描间隔（秒） |
-| `--stable` | 3 | 连续稳定次数（确认下载完成） |
+| `--stable` | 3 | 连续稳定次数 |
 | `--stable-interval` | 5 | 每次稳定检查间隔（秒） |
 | `--timeout` | 120 | 单文件转换超时（秒） |
 | `-v, --verbose` | - | 详细日志 |
@@ -71,60 +112,69 @@ pythonw ncm_auto_convert.py
   已有对应 .mp3？─── 是 ──→ 直接删除 .ncm
        │
       否
-       │
        ▼
-  文件大小稳定？（连续 N 次采样不变）
+  文件大小稳定？（连续 N 次采样不变 + 未被锁定）
        │                    │
       否                   是
        │                    │
        ▼                    ▼
-  等待下一轮         文件未被锁定？
-       │                    │
-       │                   是
-       │                    │
-       │                    ▼
-       │            ncmdump 转换
-       │                    │
-       │                    ▼
-       │            mp3 存在且 > 0？
-       │                │        │
-       │               是       否 → 保留 ncm，日志报错
-       │                │
-       │                ▼
-       │            删除 .ncm ✓
-       │
-       └──→ 继续监控
+  等待下一轮          ncmdump 转换
+                            │
+                            ▼
+                    mp3 存在且 > 0？
+                        │        │
+                       是       否 → 保留 ncm，日志报错
+                        │
+                        ▼
+                    删除 .ncm ✓
 ```
 
-## 日志
-
-运行日志保存在监控目录下的 `ncm_watcher.log`：
+## 项目结构
 
 ```
-19:26:28  NCM 自动转换守护已启动
-19:26:28    监控目录: D:\Music\Download
-19:28:31    等待下载完成... 当前 27,325,597 bytes
-19:28:36    稳定检测 1/3: 27,325,597 bytes ✓
-19:28:41    稳定检测 2/3: 27,325,597 bytes ✓
-19:28:46    稳定检测 3/3: 27,325,597 bytes ✓
-19:28:46    开始转换: Boxplot - Human Again.ncm
-19:28:46    转换成功: Boxplot - Human Again.mp3 (26.1 MB)
-19:28:46    已删除 ncm: Boxplot - Human Again.ncm
+ncm-auto-convert/
+├── tray_app.py           # 系统托盘应用（主入口）
+├── ncm_auto_convert.py   # 核心转换逻辑（可独立使用）
+├── config.py             # 配置管理
+├── icon.py               # 托盘图标生成
+├── requirements.txt      # Python 依赖
+├── install_startup.bat   # 开机自启安装
+├── uninstall_startup.bat # 开机自启卸载
+├── LICENSE               # MIT
+└── README.md
+```
+
+## 配置文件
+
+配置保存在 `%LOCALAPPDATA%/NCM-AutoConvert/config.json`：
+
+```json
+{
+  "watch_dir": "D:\\Music\\Download",
+  "ncmdump_path": "",
+  "poll_interval": 5,
+  "stable_checks": 3,
+  "stable_interval": 5,
+  "convert_timeout": 120
+}
 ```
 
 ## 常见问题
 
 **Q: 会不会转换到一半下载的文件？**
-A: 不会。脚本会连续采样文件大小（默认 3 次 × 5 秒 = 至少 15 秒无变化），还会检测文件是否被其他程序占用，双重确认下载完成后才转换。
+A: 不会。脚本会连续采样文件大小（默认 3 次 × 5 秒 = 至少 15 秒无变化），还会检测文件是否被其他程序占用。
 
 **Q: ncmdump 在哪下载？**
-A: https://github.com/anonymous5l/ncmdump/releases — 下载对应系统的版本，重命名为 `ncmdump.exe` 放到下载目录即可。
-
-**Q: 支持批量下载吗？**
-A: 支持。网易云批量下载时，脚本会逐个等待每个文件下载完成再转换，不会并发处理。
+A: https://github.com/anonymous5l/ncmdump/releases
 
 **Q: 内存 / CPU 占用多少？**
-A: 空闲时内存约 5-16 MB，CPU 接近 0（每 5 秒一次文件列表扫描）。
+A: 约 30 MB 内存，CPU 接近 0。
+
+**Q: 怎么完全退出？**
+A: 右键托盘图标 → 退出。或在任务管理器中结束 python 进程。
+
+**Q: 可以不用 GUI 只用命令行吗？**
+A: 可以，直接 `python ncm_auto_convert.py -d 目录`。
 
 ## License
 
