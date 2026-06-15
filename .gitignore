@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+*.pyo
+.ncm_processed
+*.ncm
+*.mp3
+*.lrc
+*.log
+ncmdump.exe
