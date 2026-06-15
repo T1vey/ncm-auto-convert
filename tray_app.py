@@ -6,8 +6,19 @@ NCM Auto Converter — 系统托盘应用
 入口点，直接运行即可。
 """
 
-import os
 import sys
+
+# 最早隐藏控制台窗口（必须在其他 import 之前）
+if sys.platform == "win32":
+    try:
+        import ctypes
+        _hwnd = ctypes.windll.kernel32.GetConsoleWindow()
+        if _hwnd:
+            ctypes.windll.user32.ShowWindow(_hwnd, 0)  # SW_HIDE
+    except Exception:
+        pass
+
+import os
 import time
 import threading
 import logging
@@ -446,16 +457,6 @@ class TrayApp:
 # ──────────────────────────────────────────────
 
 if __name__ == "__main__":
-    # Windows 隐藏控制台窗口
-    if sys.platform == "win32":
-        try:
-            import ctypes
-            ctypes.windll.user32.ShowWindow(
-                ctypes.windll.kernel32.GetConsoleWindow(), 0
-            )
-        except Exception:
-            pass
-
     # 单实例检测
     LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
     if LOCK_FILE.exists():
