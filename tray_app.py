@@ -7,6 +7,7 @@ NCM Auto Converter — 系统托盘应用
 """
 
 import sys
+import os
 
 # 最早隐藏控制台窗口（必须在其他 import 之前）
 if sys.platform == "win32":
@@ -14,7 +15,7 @@ if sys.platform == "win32":
         import ctypes
         _hwnd = ctypes.windll.kernel32.GetConsoleWindow()
         if _hwnd:
-            ctypes.windll.user32.ShowWindow(_hwnd, 0)  # SW_HIDE
+            ctypes.windll.user32.ShowWindow(_hwnd, 0)
     except Exception:
         pass
 
@@ -463,17 +464,13 @@ if __name__ == "__main__":
         try:
             old_pid = int(LOCK_FILE.read_text().strip())
             os.kill(old_pid, 0)
-            # 已有实例在跑 → 发信号让它打开设置
             SIGNAL_FILE.write_text("show_settings")
             sys.exit(0)
         except (ValueError, OSError, ProcessLookupError):
-            # 进程已死，清理残留锁
             LOCK_FILE.unlink(missing_ok=True)
 
-    # 写入当前 PID
     LOCK_FILE.write_text(str(os.getpid()))
 
-    # 退出时清理锁
     import atexit
     atexit.register(lambda: LOCK_FILE.unlink(missing_ok=True))
 
@@ -481,7 +478,6 @@ if __name__ == "__main__":
         app = TrayApp()
         app.run()
     except Exception as e:
-        # 错误弹窗（避免闪退无反馈）
         try:
             root = tk.Tk()
             root.withdraw()
