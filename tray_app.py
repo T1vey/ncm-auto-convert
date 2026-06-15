@@ -20,7 +20,7 @@ import pystray
 from PIL import Image
 
 import config
-from icon import create_icon
+from icon import create_tray_icon
 from ncm_auto_convert import is_file_locked, wait_until_stable
 
 # ──────────────────────────────────────────────
@@ -183,6 +183,11 @@ class SettingsDialog:
         self.win.resizable(False, False)
         self.win.configure(bg="#1a1a2e")
 
+        # 设置窗口图标
+        ico_path = Path(__file__).parent / "app.ico"
+        if ico_path.exists():
+            self.win.iconbitmap(str(ico_path))
+
         style = ttk.Style()
         style.theme_use("clam")
         style.configure(".", background="#1a1a2e", foreground="#e0e0e0", fieldbackground="#16213e")
@@ -339,7 +344,7 @@ class TrayApp:
     def _create_tray_icon(self):
         """创建系统托盘图标"""
         active = self.converter and self.converter.running
-        img = create_icon(64, active=active)
+        img = create_tray_icon(64, active=active)
 
         menu = pystray.Menu(
             pystray.MenuItem(f"状态: {self._status}", None, enabled=False),

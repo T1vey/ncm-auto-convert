@@ -10,5 +10,6 @@ build/
 *.mp3
 *.lrc
 ncmdump.exe
-test_icon.png
 .env
+*.png
+make_icon.py
