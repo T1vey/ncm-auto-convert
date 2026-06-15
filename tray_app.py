@@ -23,6 +23,9 @@ import config
 from icon import create_tray_icon
 from ncm_auto_convert import is_file_locked, wait_until_stable
 
+# 单实例锁文件
+LOCK_FILE = Path(os.environ.get("LOCALAPPDATA", "")) / "NCM-AutoConvert" / ".lock"
+
 # ──────────────────────────────────────────────
 #  核心转换逻辑（精简版，复用 ncm_auto_convert 模块）
 # ──────────────────────────────────────────────
@@ -436,5 +439,38 @@ if __name__ == "__main__":
         except Exception:
             pass
 
-    app = TrayApp()
-    app.run()
+    # 单实例检测
+    LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
+    if LOCK_FILE.exists():
+        try:
+            old_pid = int(LOCK_FILE.read_text().strip())
+            # 检查进程是否还活着
+            import signal
+            os.kill(old_pid, 0)
+            # 还活着，退出
+            sys.exit(0)
+        except (ValueError, OSError, ProcessLookupError):
+            # 进程已死，清理残留锁
+            LOCK_FILE.unlink(missing_ok=True)
+
+    # 写入当前 PID
+    LOCK_FILE.write_text(str(os.getpid()))
+
+    # 退出时清理锁
+    import atexit
+    atexit.register(lambda: LOCK_FILE.unlink(missing_ok=True))
+
+    try:
+        app = TrayApp()
+        app.run()
+    except Exception as e:
+        # 错误弹窗（避免闪退无反馈）
+        try:
+            root = tk.Tk()
+            root.withdraw()
+            messagebox.showerror("NCM Auto Converter", f"启动失败:\n\n{e}")
+            root.destroy()
+        except Exception:
+            pass
+        logging.exception(f"Fatal: {e}")
+        sys.exit(1)
