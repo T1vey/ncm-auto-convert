@@ -1,15 +1,7 @@
-"""
-NCM Auto Converter — 系统托盘应用
-=================================
-双击启动 → 首次弹出设置 → 最小化到系统托盘 → 自动监控转换
-
-入口点，直接运行即可。
-"""
-
-import sys
 import os
+import sys
 
-# 最早隐藏控制台窗口（必须在其他 import 之前）
+# 最早隐藏控制台窗口
 if sys.platform == "win32":
     try:
         import ctypes
@@ -27,6 +19,7 @@ import subprocess
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import pystray
 from PIL import Image
@@ -41,11 +34,11 @@ LOCK_FILE = APPDATA_DIR / ".lock"
 SIGNAL_FILE = APPDATA_DIR / ".show_settings"
 
 # ──────────────────────────────────────────────
-#  核心转换逻辑（精简版，复用 ncm_auto_convert 模块）
+#  核心转换逻辑（并行版）
 # ──────────────────────────────────────────────
 
 class NCMConverter:
-    """后台转换引擎，在独立线程中运行"""
+    """后台转换引擎，支持多文件并行处理"""
 
     def __init__(self, cfg: dict, log: logging.Logger, on_status=None):
         self.cfg = cfg
@@ -55,6 +48,7 @@ class NCMConverter:
         self._thread = None
         self._stop_event = threading.Event()
         self._lock = threading.Lock()
+        self._active = {}  # {filename: "等待稳定" | "转换中"}
 
     @property
     def running(self):
@@ -78,6 +72,19 @@ class NCMConverter:
             self._running = False
             self.on_status("已停止")
 
+    def _update_active(self, name: str, status: str):
+        """更新活跃任务状态"""
+        if status:
+            self._active[name] = status
+        else:
+            self._active.pop(name, None)
+        # 更新托盘提示
+        if self._active:
+            tasks = ", ".join(f"{n}" for n in self._active)
+            self.on_status(f"处理中({len(self._active)}): {tasks[:60]}")
+        else:
+            self.on_status("监控中")
+
     def _run(self):
         cfg = self.cfg
         watch_dir = Path(cfg["watch_dir"])
@@ -99,33 +106,51 @@ class NCMConverter:
 
         self.log.info(f"开始监控: {watch_dir}")
         seen = set()
+        # 并行线程池（最多同时处理 3 个文件）
+        executor = ThreadPoolExecutor(max_workers=3)
+        futures = {}
 
-        while not self._stop_event.is_set():
-            try:
-                for ncm in watch_dir.glob("*.ncm"):
+        try:
+            while not self._stop_event.is_set():
+                try:
+                    for ncm in watch_dir.glob("*.ncm"):
+                        if self._stop_event.is_set():
+                            break
+                        if ncm.name in seen:
+                            continue
+
+                        mp3 = ncm.with_suffix(".mp3")
+                        if mp3.exists() and mp3.stat().st_size > 0:
+                            self.log.info(f"清理（已有 mp3）: {ncm.name}")
+                            ncm.unlink()
+                            seen.add(ncm.name)
+                            continue
+
+                        self.log.info(f"检测到新文件: {ncm.name}")
+                        seen.add(ncm.name)
+                        # 提交到线程池并行处理
+                        future = executor.submit(self._convert, ncm, ncmdump)
+                        futures[future] = ncm.name
+
+                    # 清理已完成的任务
+                    done = [f for f in futures if f.done()]
+                    for f in done:
+                        name = futures.pop(f)
+                        try:
+                            f.result()
+                        except Exception as e:
+                            self.log.exception(f"转换任务异常 [{name}]: {e}")
+
+                except Exception as e:
+                    self.log.exception(f"扫描出错: {e}")
+
+                # 分段等待
+                for _ in range(int(cfg["poll_interval"] * 10)):
                     if self._stop_event.is_set():
                         break
-                    if ncm.name in seen:
-                        continue
-
-                    mp3 = ncm.with_suffix(".mp3")
-                    if mp3.exists() and mp3.stat().st_size > 0:
-                        self.log.info(f"清理（已有 mp3）: {ncm.name}")
-                        ncm.unlink()
-                        seen.add(ncm.name)
-                        continue
-
-                    self.log.info(f"检测到新文件: {ncm.name}")
-                    seen.add(ncm.name)
-                    self._convert(ncm, ncmdump)
-            except Exception as e:
-                self.log.exception(f"扫描出错: {e}")
-
-            # 分段等待，可以快速响应停止
-            for _ in range(int(cfg["poll_interval"] * 10)):
-                if self._stop_event.is_set():
-                    break
-                time.sleep(0.1)
+                    time.sleep(0.1)
+        finally:
+            executor.shutdown(wait=False)
 
     def _cleanup_existing(self, watch_dir: Path):
         """启动时清理已有 mp3 的残留 ncm"""
@@ -136,19 +161,26 @@ class NCMConverter:
                 ncm.unlink()
 
     def _convert(self, ncm_path: Path, ncmdump: Path):
-        """转换单个文件"""
+        """转换单个文件（在线程池中运行）"""
         cfg = self.cfg
         mp3_path = ncm_path.with_suffix(".mp3")
-        self.on_status(f"等待: {ncm_path.stem}")
+        name = ncm_path.stem
+        self._update_active(name, "等待稳定")
+        self.log.info(f"[{name}] 开始等待稳定...")
 
         # 等待稳定
         if not wait_until_stable(
             ncm_path, cfg["stable_checks"], cfg["stable_interval"], self.log
         ):
+            self._update_active(name, None)
             return
 
-        self.on_status(f"转换中: {ncm_path.stem}")
-        self.log.info(f"开始转换: {ncm_path.name}")
+        if self._stop_event.is_set():
+            self._update_active(name, None)
+            return
+
+        self._update_active(name, "转换中")
+        self.log.info(f"[{name}] 开始转换")
 
         try:
             result = subprocess.run(
@@ -156,28 +188,28 @@ class NCMConverter:
                 capture_output=True, text=True, timeout=cfg["convert_timeout"],
             )
             if result.returncode != 0:
-                self.log.error(f"转换失败: {result.stderr.strip()}")
-                self.on_status("转换失败")
+                self.log.error(f"[{name}] 转换失败: {result.stderr.strip()}")
+                self._update_active(name, None)
                 return
         except subprocess.TimeoutExpired:
-            self.log.error(f"转换超时: {ncm_path.name}")
-            self.on_status("超时")
+            self.log.error(f"[{name}] 转换超时")
+            self._update_active(name, None)
             return
         except FileNotFoundError:
-            self.log.error(f"ncmdump 未找到: {ncmdump}")
-            self.on_status("缺少 ncmdump")
+            self.log.error(f"[{name}] ncmdump 未找到")
+            self._update_active(name, None)
             return
 
         # 验证
         if not mp3_path.exists() or mp3_path.stat().st_size == 0:
-            self.log.error(f"mp3 无效: {mp3_path.name}")
-            self.on_status("验证失败")
+            self.log.error(f"[{name}] mp3 无效")
+            self._update_active(name, None)
             return
 
         mb = mp3_path.stat().st_size / 1024 / 1024
         ncm_path.unlink()
-        self.log.info(f"完成: {mp3_path.name} ({mb:.1f} MB)")
-        self.on_status("监控中")
+        self.log.info(f"[{name}] 完成 ({mb:.1f} MB)")
+        self._update_active(name, None)
 
 
 # ──────────────────────────────────────────────
@@ -278,7 +310,6 @@ class SettingsDialog:
         d = filedialog.askdirectory(title="选择网易云音乐下载目录")
         if d:
             self.var_dir.set(d)
-            # 自动找 ncmdump
             nmp = Path(d) / "ncmdump.exe"
             if nmp.exists() and not self.var_nmp.get():
                 self.var_nmp.set(str(nmp))
@@ -337,7 +368,6 @@ class TrayApp:
         log.setLevel(logging.INFO)
         fmt = logging.Formatter("%(asctime)s  %(message)s", datefmt="%H:%M:%S")
 
-        # 文件日志
         log_path = config.get_log_path(self.cfg)
         try:
             fh = logging.FileHandler(log_path, encoding="utf-8")
@@ -346,7 +376,6 @@ class TrayApp:
         except Exception:
             pass
 
-        # 控制台（开发时可见）
         ch = logging.StreamHandler()
         ch.setFormatter(fmt)
         log.addHandler(ch)
@@ -380,11 +409,9 @@ class TrayApp:
         )
 
     def _on_settings(self, icon=None, item=None):
-        """打开设置窗口（在新线程中，避免阻塞托盘）"""
         threading.Thread(target=self._show_settings, daemon=True).start()
 
     def _show_settings(self):
-        # 停止当前监控
         if self.converter and self.converter.running:
             self.converter.stop()
 
@@ -416,7 +443,7 @@ class TrayApp:
         self.converter.start()
 
     def _watch_signal(self):
-        """监听信号文件 — 其他实例请求打开设置时触发"""
+        """监听信号文件"""
         while True:
             time.sleep(1)
             if SIGNAL_FILE.exists():
@@ -429,13 +456,11 @@ class TrayApp:
 
     def run(self):
         """主入口"""
-        # 检查 ncmdump
         if self.cfg["watch_dir"]:
             nmp = Path(self.cfg["ncmdump_path"]) if self.cfg["ncmdump_path"] else Path(self.cfg["watch_dir"]) / "ncmdump.exe"
             if not nmp.exists():
                 self.log.warning(f"ncmdump 未找到: {nmp}")
 
-        # 首次运行 → 弹设置
         if not self.cfg["watch_dir"]:
             self.log.info("首次运行，打开设置向导")
             dlg = SettingsDialog(self.cfg, on_save=self._on_config_saved)
@@ -445,10 +470,8 @@ class TrayApp:
         else:
             self._start_converter()
 
-        # 启动信号文件监听线程
         threading.Thread(target=self._watch_signal, daemon=True).start()
 
-        # 创建并运行托盘
         self._create_tray_icon()
         self.icon.run()
 
