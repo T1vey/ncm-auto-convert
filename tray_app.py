@@ -132,7 +132,9 @@ class NCMConverter:
 
         self.log.info(f"[{label}] 开始监控: {wdir}")
         seen = set()
-        executor = ThreadPoolExecutor(max_workers=3)
+        max_w = cfg.get("max_workers", 10)
+        executor = ThreadPoolExecutor(max_workers=max_w)
+        self.log.info(f"[{label}] 并行度: {max_w}")
         futures = {}
 
         try:
@@ -344,6 +346,13 @@ class SettingsDialog:
         ttk.Entry(row1, textvariable=self.var_stable, width=5).pack(side="left", padx=2)
         ttk.Label(row1, text="次").pack(side="left")
 
+        row2 = ttk.Frame(frm_params)
+        row2.pack(fill="x", pady=2)
+        ttk.Label(row2, text="每目录并行数：").pack(side="left")
+        self.var_workers = tk.IntVar(value=self.cfg.get("max_workers", 10))
+        ttk.Entry(row2, textvariable=self.var_workers, width=5).pack(side="left", padx=2)
+        ttk.Label(row2, text="（同时转换的文件数，越大越快）").pack(side="left")
+
         # ── 选项 ──
         frm_opts = ttk.Frame(self.win)
         frm_opts.pack(fill="x", **pad)
@@ -438,6 +447,7 @@ class SettingsDialog:
         self.cfg["ncmdump_path"] = self.var_nmp.get().strip()
         self.cfg["poll_interval"] = max(1, self.var_poll.get())
         self.cfg["stable_checks"] = max(1, self.var_stable.get())
+        self.cfg["max_workers"] = max(1, min(50, self.var_workers.get()))
         self.cfg["delete_lrc"] = self.var_lrc.get()
         self.cfg["import_enabled"] = self.var_import.get()
         self.cfg["import_dir"] = self.var_import_dir.get().strip()

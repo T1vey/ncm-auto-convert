@@ -14,9 +14,10 @@ DEFAULTS = {
     "stable_checks": 3,
     "stable_interval": 5,
     "convert_timeout": 120,
+    "max_workers": 10,          # 每个目录的最大并行转换数
     "delete_lrc": False,
     "import_enabled": False,
-    "import_dir": "",           # 导入目标文件夹
+    "import_dir": "",
     "auto_start": False,
     "minimize_to_tray": True,
 }
