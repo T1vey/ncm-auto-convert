@@ -136,10 +136,15 @@ class NCMConverter:
         executor = ThreadPoolExecutor(max_workers=max_w)
         self.log.info(f"[{label}] 并行度: {max_w}")
         futures = {}
+        import_dir = None
+        if cfg.get("import_enabled") and cfg.get("import_dir"):
+            import_dir = Path(cfg["import_dir"])
+            import_dir.mkdir(parents=True, exist_ok=True)
 
         try:
             while not self._stop_event.is_set():
                 try:
+                    # ── 处理 ncm 文件 ──
                     for ncm in wdir.glob("*.ncm"):
                         if self._stop_event.is_set():
                             break
@@ -161,6 +166,35 @@ class NCMConverter:
                                 lrc.unlink()
                         future = executor.submit(self._convert, label, ncm, ncmdump)
                         futures[future] = ncm.name
+
+                    # ── 处理直接下载的 mp3 文件 ──
+                    for mp3 in wdir.glob("*.mp3"):
+                        if self._stop_event.is_set():
+                            break
+                        mp3_key = f"_mp3_{mp3.name}"
+                        if mp3_key in seen:
+                            continue
+                        if mp3.stat().st_size == 0:
+                            continue
+                        seen.add(mp3_key)
+                        # 删除同名 lrc
+                        if cfg.get("delete_lrc"):
+                            lrc = mp3.with_suffix(".lrc")
+                            if lrc.exists():
+                                self.log.info(f"[{label}] 删除 lrc: {lrc.name}")
+                                lrc.unlink()
+                        # 导入到目标目录
+                        if import_dir:
+                            self._move_to_import(mp3, import_dir, label)
+
+                    # ── 清理残留 lrc（无对应 mp3/ncm 的） ──
+                    if cfg.get("delete_lrc"):
+                        for lrc in wdir.glob("*.lrc"):
+                            lrc_key = f"_lrc_{lrc.name}"
+                            if lrc_key not in seen:
+                                seen.add(lrc_key)
+                                self.log.info(f"[{label}] 删除孤立 lrc: {lrc.name}")
+                                lrc.unlink()
 
                     done = [f for f in futures if f.done()]
                     for f in done:
