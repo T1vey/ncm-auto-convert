@@ -14,7 +14,9 @@ DEFAULTS = {
     "stable_checks": 3,
     "stable_interval": 5,
     "convert_timeout": 120,
-    "delete_lrc": False,       # 自动删除 .lrc 文件
+    "delete_lrc": False,
+    "import_enabled": False,
+    "import_dir": "",           # 导入目标文件夹
     "auto_start": False,
     "minimize_to_tray": True,
 }

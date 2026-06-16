@@ -109,7 +109,7 @@ class NCMConverter:
         if not ncmdump.exists():
             self.log.warning(f"[{label}] ncmdump 不存在: {ncmdump}")
 
-        # 启动清理
+        # 启动清理：有 mp3 的 ncm 直接删
         for ncm in sorted(wdir.glob("*.ncm")):
             mp3 = ncm.with_suffix(".mp3")
             if mp3.exists() and mp3.stat().st_size > 0:
@@ -121,6 +121,14 @@ class NCMConverter:
             for lrc in wdir.glob("*.lrc"):
                 self.log.info(f"[{label}] 删除 lrc: {lrc.name}")
                 lrc.unlink()
+
+        # 启动导入：已有的 mp3 移到目标目录
+        if cfg.get("import_enabled") and cfg.get("import_dir"):
+            import_dir = Path(cfg["import_dir"])
+            import_dir.mkdir(parents=True, exist_ok=True)
+            for mp3 in sorted(wdir.glob("*.mp3")):
+                if mp3.stat().st_size > 0:
+                    self._move_to_import(mp3, import_dir, label)
 
         self.log.info(f"[{label}] 开始监控: {wdir}")
         seen = set()
@@ -215,7 +223,32 @@ class NCMConverter:
         mb = mp3_path.stat().st_size / 1024 / 1024
         ncm_path.unlink()
         self.log.info(f"[{label}] 完成: {name} ({mb:.1f} MB)")
+
+        # 导入到目标目录
+        if cfg.get("import_enabled") and cfg.get("import_dir"):
+            import_dir = Path(cfg["import_dir"])
+            import_dir.mkdir(parents=True, exist_ok=True)
+            self._move_to_import(mp3_path, import_dir, label)
+
         self._update_active(label, name, None)
+
+    def _move_to_import(self, mp3_path: Path, import_dir: Path, label: str):
+        """将 mp3 移动到目标目录，重名时自动加编号"""
+        dest = import_dir / mp3_path.name
+        # 重名处理：文件名(2).mp3, 文件名(3).mp3 ...
+        if dest.exists():
+            stem = mp3_path.stem
+            suffix = mp3_path.suffix
+            i = 2
+            while dest.exists():
+                dest = import_dir / f"{stem}({i}){suffix}"
+                i += 1
+        try:
+            # os.replace: 同盘原子移动，跨盘自动复制+删除，不额外占内存
+            os.replace(str(mp3_path), str(dest))
+            self.log.info(f"[{label}] 导入: {mp3_path.name} → {dest.name}")
+        except Exception as e:
+            self.log.error(f"[{label}] 导入失败: {mp3_path.name} — {e}")
 
 
 # ──────────────────────────────────────────────
@@ -317,6 +350,23 @@ class SettingsDialog:
         self.var_lrc = tk.BooleanVar(value=self.cfg.get("delete_lrc", False))
         ttk.Checkbutton(frm_opts, text="自动删除 .lrc 文件", variable=self.var_lrc).pack(side="left")
 
+        # ── 导入目标目录 ──
+        frm_import = ttk.LabelFrame(self.win, text="导入（可选）", padding=8)
+        frm_import.pack(fill="x", **pad)
+
+        frm_imp_check = ttk.Frame(frm_import)
+        frm_imp_check.pack(fill="x")
+        self.var_import = tk.BooleanVar(value=self.cfg.get("import_enabled", False))
+        ttk.Checkbutton(frm_imp_check, text="转换后自动将 mp3 移动到目标文件夹（已有 mp3 也会移走）",
+                        variable=self.var_import).pack(side="left")
+
+        frm_imp_dir = ttk.Frame(frm_import)
+        frm_imp_dir.pack(fill="x", pady=(4, 0))
+        ttk.Label(frm_imp_dir, text="目标：").pack(side="left")
+        self.var_import_dir = tk.StringVar(value=self.cfg.get("import_dir", ""))
+        ttk.Entry(frm_imp_dir, textvariable=self.var_import_dir, width=35).pack(side="left", padx=4)
+        ttk.Button(frm_imp_dir, text="浏览…", command=self._browse_import).pack(side="left")
+
         # ── 底部按钮 ──
         frm_btn = ttk.Frame(self.win)
         frm_btn.pack(pady=(10, 16))
@@ -368,6 +418,11 @@ class SettingsDialog:
         if f:
             self.var_nmp.set(f)
 
+    def _browse_import(self):
+        d = filedialog.askdirectory(title="选择 mp3 导入目标文件夹")
+        if d:
+            self.var_import_dir.set(d)
+
     def _save(self):
         dirs = [self.listbox.get(i) for i in range(self.listbox.size())]
         if not dirs:
@@ -384,6 +439,8 @@ class SettingsDialog:
         self.cfg["poll_interval"] = max(1, self.var_poll.get())
         self.cfg["stable_checks"] = max(1, self.var_stable.get())
         self.cfg["delete_lrc"] = self.var_lrc.get()
+        self.cfg["import_enabled"] = self.var_import.get()
+        self.cfg["import_dir"] = self.var_import_dir.get().strip()
 
         config.save(self.cfg)
         if self.on_save:
