@@ -265,7 +265,7 @@ class SettingsDialog:
     def _build(self):
         self.win = tk.Tk()
         self.win.title("NCM Auto Converter — 设置")
-        self.win.geometry("560x520")
+        self.win.geometry("560x640")
         self.win.resizable(False, False)
         self.win.configure(bg="#1a1a2e")
 
@@ -297,7 +297,7 @@ class SettingsDialog:
         scrollbar.pack(side="right", fill="y")
 
         self.listbox = tk.Listbox(
-            list_frame, height=8,
+            list_frame, height=6,
             bg="#16213e", fg="#e0e0e0", selectbackground="#2a5298",
             font=("Segoe UI", 9), yscrollcommand=scrollbar.set
         )
