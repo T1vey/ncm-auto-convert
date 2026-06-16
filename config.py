@@ -8,12 +8,13 @@ CONFIG_DIR = Path.home() / "AppData" / "Local" / APP_NAME
 CONFIG_FILE = CONFIG_DIR / "config.json"
 
 DEFAULTS = {
-    "watch_dirs": [],          # 监控目录列表
-    "ncmdump_path": "",        # ncmdump 路径（空=自动找每个目录下的）
+    "watch_dirs": [],
+    "ncmdump_path": "",
     "poll_interval": 5,
     "stable_checks": 3,
     "stable_interval": 5,
     "convert_timeout": 120,
+    "delete_lrc": False,       # 自动删除 .lrc 文件
     "auto_start": False,
     "minimize_to_tray": True,
 }

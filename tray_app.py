@@ -116,6 +116,12 @@ class NCMConverter:
                 self.log.info(f"[{label}] 启动清理: {ncm.name}")
                 ncm.unlink()
 
+        # 清理 lrc
+        if cfg.get("delete_lrc"):
+            for lrc in wdir.glob("*.lrc"):
+                self.log.info(f"[{label}] 删除 lrc: {lrc.name}")
+                lrc.unlink()
+
         self.log.info(f"[{label}] 开始监控: {wdir}")
         seen = set()
         executor = ThreadPoolExecutor(max_workers=3)
@@ -137,6 +143,12 @@ class NCMConverter:
                             continue
                         self.log.info(f"[{label}] 发现: {ncm.name}")
                         seen.add(ncm.name)
+                        # 删除同名 lrc
+                        if cfg.get("delete_lrc"):
+                            lrc = ncm.with_suffix(".lrc")
+                            if lrc.exists():
+                                self.log.info(f"[{label}] 删除 lrc: {lrc.name}")
+                                lrc.unlink()
                         future = executor.submit(self._convert, label, ncm, ncmdump)
                         futures[future] = ncm.name
 
@@ -299,6 +311,12 @@ class SettingsDialog:
         ttk.Entry(row1, textvariable=self.var_stable, width=5).pack(side="left", padx=2)
         ttk.Label(row1, text="次").pack(side="left")
 
+        # ── 选项 ──
+        frm_opts = ttk.Frame(self.win)
+        frm_opts.pack(fill="x", **pad)
+        self.var_lrc = tk.BooleanVar(value=self.cfg.get("delete_lrc", False))
+        ttk.Checkbutton(frm_opts, text="自动删除 .lrc 文件", variable=self.var_lrc).pack(side="left")
+
         # ── 底部按钮 ──
         frm_btn = ttk.Frame(self.win)
         frm_btn.pack(pady=(10, 16))
@@ -365,6 +383,7 @@ class SettingsDialog:
         self.cfg["ncmdump_path"] = self.var_nmp.get().strip()
         self.cfg["poll_interval"] = max(1, self.var_poll.get())
         self.cfg["stable_checks"] = max(1, self.var_stable.get())
+        self.cfg["delete_lrc"] = self.var_lrc.get()
 
         config.save(self.cfg)
         if self.on_save:
