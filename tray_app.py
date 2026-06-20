@@ -39,6 +39,26 @@ LOCK_FILE = APPDATA_DIR / ".lock"
 SIGNAL_FILE = APPDATA_DIR / ".show_settings"
 
 
+def _is_own_process(pid: int) -> bool:
+    """确认 lock 里的 PID 真的是本程序，避免 PID 复用/僵尸 lock 导致双击无反应。"""
+    try:
+        if sys.platform == "win32":
+            out = subprocess.check_output(
+                ["wmic", "process", "where", f"ProcessId={pid}", "get", "CommandLine", "/value"],
+                stderr=subprocess.DEVNULL,
+                text=True,
+                encoding="utf-8",
+                errors="ignore",
+                timeout=3,
+            )
+            low = out.lower()
+            return "tray_app.py" in low and "ncm-auto-convert" in low
+        os.kill(pid, 0)
+        return True
+    except Exception:
+        return False
+
+
 # ──────────────────────────────────────────────
 #  转换引擎（多目录并行）
 # ──────────────────────────────────────────────
@@ -597,7 +617,7 @@ class TrayApp:
                     pass
                 self._on_settings()
 
-    def run(self):
+    def run(self, show_settings: bool = True):
         dirs = self.cfg.get("watch_dirs", [])
         if not dirs:
             self.log.info("首次运行，打开设置向导")
@@ -605,10 +625,14 @@ class TrayApp:
             dlg.show()
             if not self.cfg.get("watch_dirs"):
                 sys.exit(0)
+            self._start_converter()
         else:
             self._start_converter()
-            # 手动双击启动时不要只躲进托盘；主动弹设置窗口，让用户确认程序已打开。
-            threading.Thread(target=self._show_settings, daemon=True).start()
+            # 手动双击启动时不要只躲进托盘；设置窗口必须在主线程打开，
+            # 否则 Tk 在后台线程里可能不显示或直接静默失败。
+            if show_settings:
+                dlg = SettingsDialog(self.cfg, on_save=self._on_config_saved)
+                dlg.show()
 
         threading.Thread(target=self._watch_signal, daemon=True).start()
         self._create_tray_icon()
@@ -624,9 +648,11 @@ if __name__ == "__main__":
     if LOCK_FILE.exists():
         try:
             old_pid = int(LOCK_FILE.read_text().strip())
-            os.kill(old_pid, 0)
-            SIGNAL_FILE.write_text("show_settings")
-            sys.exit(0)
+            if _is_own_process(old_pid):
+                SIGNAL_FILE.write_text("show_settings")
+                sys.exit(0)
+            # PID 不属于本程序：陈旧 lock，清理后正常启动
+            LOCK_FILE.unlink(missing_ok=True)
         except (ValueError, OSError, ProcessLookupError):
             LOCK_FILE.unlink(missing_ok=True)
 
