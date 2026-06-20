@@ -558,12 +558,14 @@ class TrayApp:
         threading.Thread(target=self._show_settings, daemon=True).start()
 
     def _show_settings(self):
-        if self.converter and self.converter.running:
-            self.converter.stop()
+        # 打开设置窗口不再停止监控；只有保存新配置时才重启监控。
+        # 否则用户点“取消”会导致后台转换器被停掉，看起来像“打不开/没运行”。
         dlg = SettingsDialog(self.cfg, on_save=self._on_config_saved)
         dlg.show()
 
     def _on_config_saved(self, new_cfg: dict):
+        if self.converter and self.converter.running:
+            self.converter.stop()
         self.cfg = new_cfg
         self.log = self._setup_logging()
         self._start_converter()
@@ -605,6 +607,8 @@ class TrayApp:
                 sys.exit(0)
         else:
             self._start_converter()
+            # 手动双击启动时不要只躲进托盘；主动弹设置窗口，让用户确认程序已打开。
+            threading.Thread(target=self._show_settings, daemon=True).start()
 
         threading.Thread(target=self._watch_signal, daemon=True).start()
         self._create_tray_icon()
